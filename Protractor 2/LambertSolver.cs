@@ -6,9 +6,10 @@ using UnityEngine;
 public static class LambertSolver
 {
 	public const double TwoPi = 2.0d * Math.PI;
-	public static double InverseSquareGoldenRatio = (3.0d - Math.Sqrt (5.0d)) * 0.5d; // This is 1 - (1 / phi)
-	public static double MachineEpsilon = CalculateMachineEpsilon ();
-	public static double SqrtMachineEpsilon = Math.Sqrt (MachineEpsilon);
+	public const double HalfPi = 0.5d * Math.PI;
+	public static double InverseSquareGoldenRatio = (3.0d - Math.Sqrt(5.0d)) * 0.5d; // This is 1 - (1 / phi) == 1/phi^2
+	public static double MachineEpsilon = CalculateMachineEpsilon();
+	public static double SqrtMachineEpsilon = Math.Sqrt(MachineEpsilon);
 
 	/// <summary>
 	/// Find the universal time of the next lauch window from <paramref name="origin"/> to <paramref name="destination"/>.
@@ -16,110 +17,107 @@ public static class LambertSolver
 	/// </summary>
 	/// <param name="origin">The origin body.</param>
 	/// <param name="destination">The destination body. Must have the same <c>referenceBody</c> as <paramref name="origin"/>.</param>
-	public static double NextLaunchWindowUT (CelestialBody origin, CelestialBody destination)
+	public static double NextLaunchWindowUT(CelestialBody origin, CelestialBody destination)
 	{
-		if (origin.referenceBody != destination.referenceBody) 
-        {
-			throw new ArgumentException ("Origin and destination bodies must be orbiting the same referenceBody.");
+		if (origin.referenceBody != destination.referenceBody)
+		{
+			throw new ArgumentException("Origin and destination bodies must be orbiting the same referenceBody.");
 		}
 
-		double now = Planetarium.GetUniversalTime ();
+		double now = Planetarium.GetUniversalTime();
 
-		double currentPhaseAngle = CurrentPhaseAngle (origin.orbit, destination.orbit);
-		double hohmannPhaseAngle = HohmannPhaseAngle (origin.orbit, destination.orbit);
+		double currentPhaseAngle = CurrentPhaseAngle(origin.orbit, destination.orbit);
+		double hohmannPhaseAngle = HohmannPhaseAngle(origin.orbit, destination.orbit);
 		double deltaPhaseAngle = (360.0 + currentPhaseAngle - hohmannPhaseAngle) % 360.0;
-		if (destination.orbit.semiMajorAxis < origin.orbit.semiMajorAxis) 
-        {
+		if (destination.orbit.semiMajorAxis < origin.orbit.semiMajorAxis)
+		{
 			deltaPhaseAngle = 360.0 - deltaPhaseAngle;
 		}
 
-		double synodicPeriod = Math.Abs (1.0 / (1.0 / origin.orbit.period - 1.0 / destination.orbit.period));
+		double synodicPeriod = Math.Abs(1.0 / (1.0 / origin.orbit.period - 1.0 / destination.orbit.period));
 		double estimatedDeparture = now + deltaPhaseAngle / (360.0 / synodicPeriod);
 
-		if (CoplanarOrbits (origin.orbit, destination.orbit) && origin.orbit.eccentricity == 0 && destination.orbit.eccentricity == 0) 
-        { // Hohmann transfer
+		if (CoplanarOrbits(origin.orbit, destination.orbit) && origin.orbit.eccentricity == 0 && destination.orbit.eccentricity == 0)
+		{ // Hohmann transfer
 			return estimatedDeparture;
-		} 
-        else 
-        {
+		}
+		else
+		{
 			double gravParameter = origin.referenceBody.gravParameter;
-			double hohmannTimeOfFlight = HohmannTimeOfFlight (origin.orbit, destination.orbit);
+			double hohmannTimeOfFlight = HohmannTimeOfFlight(origin.orbit, destination.orbit);
 			double xmin = now;
 			double xmax = now + synodicPeriod;
 			bool longWay = false;
 
-			Func<Vector2d, Vector2d, Range> boundsFunc = (Vector2d point, Vector2d direction) => 
-            {
+			Func<Vector2d, Vector2d, Range> boundsFunc = (Vector2d point, Vector2d direction) => {
 				double t_xmin = 0, t_xmax = 0;
-				if (direction.x != 0) 
-                {
-					if (direction.x > 0) 
-                    {
+				if (direction.x != 0)
+				{
+					if (direction.x > 0)
+					{
 						t_xmin = (xmin - point.x) / direction.x;
 						t_xmax = (xmax - point.x) / direction.x;
-					} 
-                    else 
-                    {
+					}
+					else
+					{
 						t_xmin = (xmax - point.x) / direction.x;
 						t_xmax = (xmin - point.x) / direction.x;
 					}
 
-					if (Math.Abs (direction.y / direction.x) < 0.1) 
-                    { // Direction is > 90% horizontal, don't worry about the y bounds
-						return new Range (t_xmin, t_xmax);
+					if (Math.Abs(direction.y / direction.x) < 0.1)
+					{ // Direction is > 90% horizontal, don't worry about the y bounds
+						return new Range(t_xmin, t_xmax);
 					}
 				}
 
-				double timeToOpposition = TimeAtOpposition (origin.orbit.getRelativePositionAtUT (point.x), destination.orbit, point.x + 0.5 * hohmannTimeOfFlight) - point.x;
+				double timeToOpposition = TimeAtOpposition(origin.orbit.getRelativePositionAtUT(point.x), destination.orbit, point.x + 0.5 * hohmannTimeOfFlight) - point.x;
 
 				double ymin = longWay ? 0.95 * timeToOpposition : 0.5 * hohmannTimeOfFlight;
 				double ymax = longWay ? 2.0 * hohmannTimeOfFlight : 1.05 * timeToOpposition;
 				double t_ymin, t_ymax;
-                
-                if (direction.y > 0) 
-                {
+				if (direction.y > 0)
+				{
 					t_ymin = (ymin - point.y) / direction.y;
 					t_ymax = (ymax - point.y) / direction.y;
-				} 
-                else 
-                {
+				}
+				else
+				{
 					t_ymin = (ymax - point.y) / direction.y;
 					t_ymax = (ymin - point.y) / direction.y;
 				}
 
-				if (Math.Abs (direction.x / direction.y) < 0.1) 
-                { // Direction is > 90% vertical, don't worry about the x bounds
-					return new Range (t_ymin, t_ymax);
-				} 
-                else 
-                {
-					return new Range (Math.Max (t_xmin, t_ymin), Math.Min (t_xmax, t_ymax));
+				if (Math.Abs(direction.x / direction.y) < 0.1)
+				{ // Direction is > 90% vertical, don't worry about the x bounds
+					return new Range(t_ymin, t_ymax);
+				}
+				else
+				{
+					return new Range(Math.Max(t_xmin, t_ymin), Math.Min(t_xmax, t_ymax));
 				}
 			};
 
-			Func<Vector2d,Vector3d> deltaVFunc = (Vector2d coords) => 
-            {
+			Func<Vector2d,Vector3d> deltaVFunc = (Vector2d coords) => {
 				double t1 = coords.x;
 				double dt = coords.y;
-				Vector3d pos1 = origin.orbit.getRelativePositionAtUT (t1);
-				Vector3d pos2 = destination.orbit.getRelativePositionAtUT (t1 + dt);
-				Vector3d ejectionVelocity = Solve (gravParameter, pos1, pos2, dt, longWay);
-				return ejectionVelocity - origin.orbit.getOrbitalVelocityAtUT (t1);
+				Vector3d pos1 = origin.orbit.getRelativePositionAtUT(t1);
+				Vector3d pos2 = destination.orbit.getRelativePositionAtUT(t1 + dt);
+				Vector3d ejectionVelocity = Solve(gravParameter, pos1, pos2, dt, longWay);
+				return ejectionVelocity - origin.orbit.getOrbitalVelocityAtUT(t1);
 			};
 
-			Vector2d shortTransfer = new Vector2d (now + estimatedDeparture, 0.90 * hohmannTimeOfFlight);
-			Vector3d shortDeltaVector = MinimizeDeltaV (ref shortTransfer, boundsFunc, 1e-4, deltaVFunc);
+			Vector2d shortTransfer = new Vector2d(now + estimatedDeparture, 0.90 * hohmannTimeOfFlight);
+			Vector3d shortDeltaVector = MinimizeDeltaV(ref shortTransfer, boundsFunc, 1e-4, deltaVFunc);
 
 			longWay = true;
-			Vector2d longTransfer = new Vector2d (shortTransfer.x, 1.10 * hohmannTimeOfFlight);
-			Vector3d longDeltaVector = MinimizeDeltaV (ref longTransfer, boundsFunc, 1e-4, deltaVFunc);
+			Vector2d longTransfer = new Vector2d(shortTransfer.x, 1.10 * hohmannTimeOfFlight);
+			Vector3d longDeltaVector = MinimizeDeltaV(ref longTransfer, boundsFunc, 1e-4, deltaVFunc);
 
-			if (shortDeltaVector.sqrMagnitude <= longDeltaVector.sqrMagnitude) 
-            {
+			if (shortDeltaVector.sqrMagnitude <= longDeltaVector.sqrMagnitude)
+			{
 				return shortTransfer.x;
-			} 
-            else 
-            {
+			}
+			else
+			{
 				return longTransfer.x;
 			}
 		}
@@ -135,8 +133,10 @@ public static class LambertSolver
 	/// <param name="angleToPrograde">The angle to the vessel's parent body's prograde vector where the impulse burn should take place.</param>
 	/// <param name="ejectionInclination">The inclination of the hyperbolic ejection orbit.</param>
 	/// <param name="deltaV">The total delta-v of the ejection burn, including inclination change.</param>
-	public static void EjectionBurn (double ut, Vessel vessel, CelestialBody destination, out double angleToPrograde, out double ejectionInclination, out double deltaV)
+	public static Vector3d EjectionBurn(ref double ut, Vessel vessel, CelestialBody destination)
 	{
+		ManeuverNode n = new ManeuverNode();
+		n.
 		CelestialBody origin = vessel.mainBody;
 		if (origin.referenceBody != destination.referenceBody) {
 			throw new ArgumentException ("Vessel must be orbiting a body with the same referenceBody as destination.");
@@ -288,57 +288,90 @@ public static class LambertSolver
 	/// <param name="longWay">If set to <c>true</c>, solve for an orbit subtending more than 180 degrees between <paramref name="pos1"/> and <paramref name="pos2"/>.</param>
 	public static Vector3d Solve (double gravParameter, Vector3d pos1, Vector3d pos2, double timeOfFlight, bool longWay)
 	{
-		// From: http://www.braeunig.us/space/interpl.htm#gauss
+		// Based on Sun, F.T. "On the Minium Time Trajectory and Multiple Solutions of Lambert's Problem"
+		// AAS/AIAA Astrodynamics Conference, Provincetown, Massachusetts, AAS 79-164, June 25-27, 1979
 		double r1 = pos1.magnitude;
 		double r2 = pos2.magnitude;
 		double cosAngleOfFlight = Vector3d.Dot (pos1, pos2) / (r1 * r2);
 		double angleOfFlight = Math.Acos (cosAngleOfFlight);
-
-		double k = r1 * r2 * (1 - cosAngleOfFlight); // Eq. 5.9
-		double l = r1 + r2; // Eq. 5.10
-		double m = r1 * r2 * (1 + cosAngleOfFlight); // Eq. 5.11
-		double f = 0, g = 0; // Additional intermediate terms to be calculated later
-
-		Func<double,double> func = (x) => { // Calculates the difference between timeOfFlight and the time of flight of an orbit with a semi-latus rectum of x
-			// From: http://www.braeunig.us/space/interpl.htm#gauss
-			double a = m * k * x / ((2 * m - l * l) * x * x + 2 * k * l * x - k * k); // Semi-major axis (Eq. 5.12)
-
-			f = 1 - r2 / x * (1 - cosAngleOfFlight); // Eq. 5.5
-			g = r1 * r2 * Math.Sin (angleOfFlight) / Math.Sqrt (gravParameter * x); // Eq. 5.6
-
-			if (a > 0) { // Elliptical orbit
-				double df = Math.Sqrt (gravParameter / x) * Math.Tan (angleOfFlight / 2) * ((1 - cosAngleOfFlight) / x - 1 / r1 - 1 / r2); // Eq. 5.7
-				double dE = Math.Acos (1 - r1 / a * (1 - f)); // Eq. 5.13
-				double sinDeltaE = -r1 * r2 * df / Math.Sqrt (gravParameter * a); // Eq. 5.14
-				if (sinDeltaE < 0) {
-					dE = TwoPi - dE;
-				}
-				return timeOfFlight - (g + Math.Sqrt (a * a * a / gravParameter) * (dE - sinDeltaE)); // Eq. 5.16
-			} else { // Hyperbolic orbit
-				double dF = Acosh (1 - r1 / a * (1 - f)); // Eq. 5.15
-				return timeOfFlight - (g + Math.Sqrt (-a * a * a / gravParameter) * (Math.Sinh (dF) - dF)); // Eq. 5.17
-			}
-		};
-
-		Range bounds;
 		if (longWay) {
 			angleOfFlight = TwoPi - angleOfFlight;
-
-			bounds.lower = k / (l - Math.Sqrt (2 * m)); // Semi-latus rectum of orbit is between 0 and bounds.lower (Eq. 5.19)
-			bounds.upper = bounds.lower * 1e-3; // Guess that the actual semi-latus rectum is between bounds.lower / 1000 and bounds.lower
-			bounds.lower *= 0.999999; // Avoid floating point errors
-		} else {
-			bounds.lower = k / (l + Math.Sqrt (2 * m)); // Semi-latus rectum of orbit is between bounds.lower and infinity (Eq. 5.18)
-			bounds.upper = bounds.lower * 1e3; // Guess that the actual semi-latus rectum is between bounds.lower and bounds.lower * 1000
-			bounds.lower *= 1.000001; // Avoid floating point errors
 		}
 
-		double p = FindRoot (bounds, 1e-4, func);
+		// Intermediate terms
+		Vector3d deltaPos = pos2 - pos1;
+		double c = deltaPos.magnitude;
+		double m = r1 + r2 + c;
+		double n = r1 + r2 - c;
 
-		// Recalculate f and g for the found root
-		f = 1 - r2 / p * (1 - cosAngleOfFlight); // Eq. 5.5
-		g = r1 * r2 * Math.Sin (angleOfFlight) / Math.Sqrt (gravParameter * p); // Eq. 5.6
-		return (pos2 - f * pos1) / g; // Eq. 5.3
+		double cosHalfAngleOfFlight = Math.Cos (0.5 * angleOfFlight);
+		double angleParameter = Math.Sqrt (4.0 * r1 * r2 / (m * m) * cosHalfAngleOfFlight * cosHalfAngleOfFlight);
+		if (longWay) {
+			angleParameter = -angleParameter;
+		}
+
+		double normalizedTime = 4.0 * timeOfFlight * Math.Sqrt (gravParameter / (m * m * m));
+		double parabolicNormalizedTime = 2.0 / 3.0 * (1 - angleParameter * angleParameter * angleParameter);
+		double minimumEnergyNormalizedTime = Math.Acos (angleParameter) + angleParameter * Math.Sqrt (1 - angleParameter * angleParameter);
+
+		double x, y; // Path parameters
+		Func<double,double> fy = (xn) => (angleParameter < 0) ? -Math.Sqrt (1.0 - angleParameter * angleParameter * (1.0 - xn * xn)) : Math.Sqrt (1.0 - angleParameter * angleParameter * (1.0 - xn * xn));
+		if (normalizedTime == parabolicNormalizedTime) { // Parabolic solution
+			x = 1.0;
+			y = (angleParameter < 0) ? -1 : 1;
+		} else if (normalizedTime == minimumEnergyNormalizedTime) { // Minimum energy elliptical solution
+			x = 0.0;
+			y = fy (x);
+		} else {
+			// Returns the difference between the normalized time for a path parameter of xn and normalizedTime
+			Func<double,double> fdt = (xn) => {
+				if (xn == 1.0) { // Parabolic
+					return parabolicNormalizedTime - normalizedTime;
+				} else {
+					double yn = fy(xn);
+
+					double g, h;
+					if (xn > 1.0) { // Hyperbolic
+						g = Math.Sqrt (xn * xn - 1.0);
+						h = Math.Sqrt (yn * yn - 1.0);
+						return (Acoth (yn / h) - Acoth (xn / g) + xn * g - yn * h) / (g * g * g) - normalizedTime;
+					} else { // Elliptical (-1 < x < 1)
+						g = Math.Sqrt (1.0 - xn * xn);
+						h = Math.Sqrt (1.0 - yn * yn);
+						return (Acot (xn / g) - Math.Atan(h / yn) - xn * g + yn * h) / (g * g * g) - normalizedTime;
+					}
+				}
+			};
+
+			// Select our bounds based on the relationship between the known normalized times and normalizedTime
+			Range bounds;
+			if (normalizedTime > minimumEnergyNormalizedTime) { // Elliptical high path solution
+				bounds.lower = -1.0 + MachineEpsilon;
+				bounds.upper = 0.0;
+			} else if (normalizedTime > parabolicNormalizedTime) { // Elliptical low path solution
+				bounds.lower = 0.0;
+				bounds.upper = 1.0;
+			} else { // Hyperbolic solution
+				bounds.lower = 1.0;
+				bounds.upper = 2.0;
+				while (fdt(bounds.upper) > 0.0) {
+					bounds.lower = bounds.upper;
+					bounds.upper *= 2.0;
+				}
+			}
+
+			x = FindRoot (bounds, 1e-4, fdt); // Solve for x
+			y = fy (x);
+		}
+
+		double sqrtMu = Math.Sqrt (gravParameter);
+		double invSqrtM = 1.0 / Math.Sqrt (m);
+		double invSqrtN = 1.0 / Math.Sqrt (n);
+
+		double vc = sqrtMu * (y * invSqrtN + x * invSqrtM);
+		double vr = sqrtMu * (y * invSqrtN - x * invSqrtM);
+		Vector3d ec = deltaPos * (vc / c);
+		return ec + pos1 * (vr / r1);
 	}
 
 	private struct Range
@@ -352,16 +385,16 @@ public static class LambertSolver
 		}
 	}
 
-	private static Vector3d MinimizeDeltaV (ref Vector2d p0, Func<Vector2d, Vector2d, Range> getBounds, double precision, Func<Vector2d, Vector3d> f)
+	private static Vector3d MinimizeDeltaV (ref Vector2d p0, Func<Vector2d, Vector2d, Range> getBounds, double relativeAccuracy, Func<Vector2d, Vector3d> f)
 	{
 		// Uses Powell's method to find the local minimum of f(x,y) within the bounds returned by getBounds(point, direction): http://en.wikipedia.org/wiki/Powell's_method
 		Queue<Vector2d> directionVectors = new Queue<Vector2d> (new Vector2d[] { new Vector2d (1, 0), new Vector2d (0, 1) });
-		double sqrPrecision = precision * precision;
+		double sqrRelativeAccuracy = relativeAccuracy * relativeAccuracy;
 		Vector3d result = new Vector3d();
 
 		Func<Vector2d, Vector2d, Vector2d> findMinimumAlongDirection = (p, direction) => {
 			double u;
-			result = MinimizeDeltaV (getBounds (p, direction), out u, precision, (v) => {
+			result = MinimizeDeltaV (getBounds (p, direction), out u, relativeAccuracy, (v) => {
 				Vector2d point = p + v * direction;
 				return f (point); });
 			return p + u * direction;
@@ -380,7 +413,7 @@ public static class LambertSolver
 			double sqrDistance = (pn - p0).sqrMagnitude;
 			p0 = pn;
 
-			if (sqrDistance <= p0.sqrMagnitude * sqrPrecision) {
+			if (sqrDistance <= p0.sqrMagnitude * sqrRelativeAccuracy) {
 				return result;
 			}
 		}
@@ -388,7 +421,7 @@ public static class LambertSolver
 		throw new Exception ("LambertSolver 2D delta-v minimization failed to converge!");
 	}
 
-	private static Vector3d MinimizeDeltaV (Range bounds, out double x, double precision, Func<double,Vector3d> f)
+	private static Vector3d MinimizeDeltaV (Range bounds, out double x, double relativeAccuracy, Func<double,Vector3d> f)
 	{
 		// Uses Brent's method of parabolic interpolation to find a local minimum: http://linneus20.ethz.ch:8080/1_5_2.html
 		x = bounds.lower + InverseSquareGoldenRatio * (bounds.upper - bounds.lower);
@@ -403,7 +436,7 @@ public static class LambertSolver
 
 		for (int i = 0;; i++) {
 			double midpoint = 0.5d * (bounds.lower + bounds.upper);
-			double tol = (SqrtMachineEpsilon + precision) * Math.Abs (x);
+			double tol = (SqrtMachineEpsilon + relativeAccuracy) * Math.Abs (x);
 			double t2 = 2.0d * tol;
 
 			if (Math.Abs (x - midpoint) <= t2 - 0.5d * (bounds.upper - bounds.lower)) { // Are we close enough?
@@ -497,7 +530,7 @@ public static class LambertSolver
 		}
 	}
 
-	private static double FindRoot (Range bounds, double precision, Func<double,double> f)
+	private static double FindRoot (Range bounds, double relativeAccuracy, Func<double,double> f)
 	{
 		// Uses Brent's root finding method: http://math.fullerton.edu/mathews/n2003/BrentMethodMod.html
 		double a = bounds.lower;
@@ -525,7 +558,7 @@ public static class LambertSolver
 				fc = fa;
 			}
 
-			double tol = (0.5d * MachineEpsilon + precision) * Math.Abs (b);
+			double tol = (0.5d * MachineEpsilon + relativeAccuracy) * Math.Abs (b);
 			double m = 0.5d * (c - b);
 
 			if (fb == 0 || Math.Abs (m) <= tol) {
@@ -643,9 +676,14 @@ public static class LambertSolver
 		return o1.inclination == o2.inclination && (o1.inclination == 0 || o1.LAN == o2.LAN);
 	}
 
-	private static double Acosh (double x)
+	private static double Acot (double x)
 	{
-		return Math.Log (x + Math.Sqrt (x * x - 1));
+		return HalfPi - Math.Atan (x);
+	}
+	
+	private static double Acoth (double x)
+	{
+		return 0.5 * Math.Log ((x + 1) / (x - 1));
 	}
 
 	private static double CalculateMachineEpsilon ()
