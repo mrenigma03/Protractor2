@@ -15,6 +15,7 @@ public static class LambertSolver
 	/// Find the universal time of the next lauch window from <paramref name="origin"/> to <paramref name="destination"/>.
 	/// Limitations: Does not take into account ejection inclination change costs. Does not take into acccount insertion delta-v.
 	/// </summary>
+	/// <returns>The universal time of the next launch window from <paramref name="origin"/> to <paramref name="destination"/>.</returns>
 	/// <param name="origin">The origin body.</param>
 	/// <param name="destination">The destination body. Must have the same <c>referenceBody</c> as <paramref name="origin"/>.</param>
 	public static double NextLaunchWindowUT(CelestialBody origin, CelestialBody destination)
@@ -125,40 +126,35 @@ public static class LambertSolver
 
 	/// <summary>
 	/// Determines the ejection burn parameters to take <paramref name="vessel"/> from its parent body to <paramref name="destination"/>.
-	/// Limitations: Does not take into account inclination change delta-v when determining the time of the optimal transfer.
+	/// Limitations: Does not take into account inclination change or radial delta-v when determining the time of the optimal transfer.
 	/// </summary>
-	/// <param name="ut">The universal time of the ejection burn.</param>
+	/// <returns>A maneuver-node-compatible vector of radial, normal, and prograde delta-Vs.</returns>
+	/// <param name="ejectionUT">The universal time of the ejection burn. This value is updated with the actual time to perform the ejection.</param>
 	/// <param name="vessel">The vessel's orbit is assumed to be (approximately) circular and equatorial.</param>
 	/// <param name="destination">The destination body.</param>
-	/// <param name="angleToPrograde">The angle to the vessel's parent body's prograde vector where the impulse burn should take place.</param>
-	/// <param name="ejectionInclination">The inclination of the hyperbolic ejection orbit.</param>
-	/// <param name="deltaV">The total delta-v of the ejection burn, including inclination change.</param>
-	public static Vector3d EjectionBurn(ref double ut, Vessel vessel, CelestialBody destination)
+	public static Vector3d EjectionBurn(ref double ejectionUT, Vessel vessel, CelestialBody destination)
 	{
-		ManeuverNode n = new ManeuverNode();
-		n.
 		CelestialBody origin = vessel.mainBody;
 		if (origin.referenceBody != destination.referenceBody) {
 			throw new ArgumentException ("Vessel must be orbiting a body with the same referenceBody as destination.");
 		}
 
 		double gravParameter = origin.referenceBody.gravParameter;
-		Vector3d pos1 = origin.orbit.getRelativePositionAtUT (ut);
-		Vector3d originVelocity = origin.orbit.getOrbitalVelocityAtUT (ut);
-		Vector3d originNormal = origin.orbit.GetOrbitNormal ().normalized;
+		Vector3d pos1 = origin.orbit.getRelativePositionAtUT (ejectionUT);
+		Vector3d originVelocity = origin.orbit.getOrbitalVelocityAtUT (ejectionUT);
 		double hohmannTimeOfFlight = HohmannTimeOfFlight (origin.orbit, destination.orbit);
 
-		Vector3d deltaVector;
+		// Calculate the cheapest deltaV to transfer from origin to destination at ejectionUT
+		Vector3d deltaV;
+		double ut = ejectionUT;
 		if (CoplanarOrbits (origin.orbit, destination.orbit)) {
 			Range bounds = new Range (0.5d * hohmannTimeOfFlight, 2.0d * hohmannTimeOfFlight);
 
 			double timeOfFlight;
-			deltaVector = MinimizeDeltaV (bounds, out timeOfFlight, 1e-4, (x) => {
+			deltaV = MinimizeDeltaV (bounds, out timeOfFlight, 1e-4, (x) => {
 				Vector3d pos2 = destination.orbit.getRelativePositionAtUT (ut + x);
 				Vector3d ejectionVelocity = Solve (gravParameter, pos1, pos2, x, (x > hohmannTimeOfFlight));
 				return ejectionVelocity - originVelocity; });
-
-			Debug.Log (String.Format ("timeOfFlight, deltaVector, deltaV: {0}, {1}, {2}", timeOfFlight / 3600 / 24, deltaVector, deltaVector.magnitude));
 		} else {
 			double timeToOpposition = TimeAtOpposition (pos1, destination.orbit, ut + 0.5 * hohmannTimeOfFlight) - ut;
 			bool longWay = false;
@@ -180,33 +176,35 @@ public static class LambertSolver
 			Vector3d longDeltaVector = MinimizeDeltaV (bounds, out longTimeOfFlight, 1e-4, func);
 
 			if (shortDeltaVector.sqrMagnitude <= longDeltaVector.sqrMagnitude) {
-				deltaVector = shortDeltaVector;
-				Debug.Log (String.Format ("timeOfFlight, deltaVector, deltaV: {0}, {1}, {2}", shortTimeOfFlight / 3600 / 24, deltaVector, deltaVector.magnitude));
+				deltaV = shortDeltaVector;
 			} else {
-				deltaVector = longDeltaVector;
-				Debug.Log (String.Format ("timeOfFlight, deltaVector, deltaV: {0}, {1}, {2}", longTimeOfFlight / 3600 / 24, deltaVector, deltaVector.magnitude));
+				deltaV = longDeltaVector;
 			}
 		}
 
-		deltaV = deltaVector.magnitude;
-		ejectionInclination = Math.Asin (Vector3d.Dot (deltaVector, originNormal) / deltaV) * 180.0d / Math.PI;
-		if (vessel.orbit.eccentricity < 1.0) { // Vessel is in an elliptical orbit
-			// Assume the orbit is circular and equatorial. Otherwise we'd have to do another minimization search.
-			double orbitalSpeed = vessel.orbit.getOrbitalVelocityAtUT (ut).magnitude;
-			double vinf = deltaV;
-			deltaV = CircularToHyperbolicDeltaV (orbitalSpeed, vinf, ejectionInclination);
+		// Calculate the hyperbolic ejection orbit that ends up with a residual deltaV (vinf) of 'deltaV'
+		Orbit vesselOrbit = vessel.orbit;
+		double vinf = deltaV.magnitude; // vinf is the speed we will be going upon leaving the origin SOI
+		double r0 = vessel.orbit.semiMajorAxis; // r0 is the radius of our orbit at time of ejection (we're assuming the orbit is circular for now)
+		double v1 = Math.Sqrt (vinf * vinf + 2 * origin.gravParameter / r0); // Eq. 5.35, the speed of our hyperbolic ejection orbit at a periapsis of r0
+		double e = r0 * v1 * v1 / origin.gravParameter - 1; // Eq. 4.30 simplified for a flight path angle of 0 (because we're at periapsis), this is the eccentricity of our hyperbolic ejection orbit
+		Vector3d orbitNormal = vesselOrbit.GetOrbitNormal().normalized;
+		Vector3d ejectionDirection = HyperbolicEjectionAngle(deltaV, e, orbitNormal);
+		double trueAnomaly = TrueAnomaly(vesselOrbit, ejectionDirection);
+		Vector3d ejectionVector = v1 * Vector3d.Cross(orbitNormal, ejectionDirection); // Velocity vector of our hyperbolic ejection orbit at ejection (aka hyperbolic periapsis)
 
-			double r = vessel.orbit.getRelativePositionAtUT (ut).magnitude;
-			double v = orbitalSpeed + CircularToHyperbolicDeltaV (orbitalSpeed, vinf);
-			double e = r * v * v / gravParameter - 1; // Eq. 4.30 simplified for a flight path angle of 0
-			angleToPrograde = HyperbolicEjectionAngle (deltaVector, e, originNormal, originVelocity);
-		} else {
-			Vector3d deltaVInPlane = Vector3d.Exclude (originNormal, deltaVector);
-			angleToPrograde = Vector3d.Angle (deltaVInPlane, originVelocity);
-			if (Vector3d.Dot (Vector3d.Cross (deltaVInPlane, originVelocity), originNormal) < 0) {
-				angleToPrograde = 360.0d - angleToPrograde;
-			}
-		}
+		// Modify the ejectionUT for when the vessel will reach the correct trueAnomaly
+		ejectionUT = Planetarium.GetUniversalTime() + vesselOrbit.GetDTforTrueAnomaly(trueAnomaly, 0);
+
+		Vector3d orbitalVelocity = vesselOrbit.getOrbitalVelocityAtUT(ejectionUT);
+		Vector3d ejectionBurn = ejectionVector - orbitalVelocity;
+
+		// Calculate the components of our ejection burn
+		double prograde = Vector3d.Dot(ejectionBurn, orbitalVelocity.normalized);
+		double normal = Vector3d.Dot(ejectionBurn, orbitNormal);
+		double radial = Vector3d.Dot(ejectionBurn, Vector3d.Exclude(orbitalVelocity, ejectionDirection).normalized);
+
+		return new Vector3d(radial, normal, prograde);
 	}
 
 	/// <summary>
@@ -261,14 +259,7 @@ public static class LambertSolver
 	public static double TimeAtOpposition (Vector3d origin, Orbit destination, double after = 0)
 	{
 		Vector3d normal = destination.GetOrbitNormal ().normalized;
-		Vector3d periapsis = destination.GetEccVector ();
-		Vector3d direction = Vector3d.Exclude (normal, -origin);
-
-		double trueAnomaly = Vector3d.Angle (periapsis, direction) * Mathf.Deg2Rad;
-		if (Vector3d.Dot (Vector3d.Cross (periapsis, direction), normal) < 0) {
-			trueAnomaly = TwoPi - trueAnomaly;
-		}
-
+		double trueAnomaly = TrueAnomaly(destination, Vector3d.Exclude(normal, -origin));
 		double ut = Planetarium.GetUniversalTime () + destination.GetDTforTrueAnomaly (trueAnomaly, 0);
 		while (ut <= after) {
 			ut += destination.period;
@@ -626,10 +617,9 @@ public static class LambertSolver
 		}
 	}
 
-	private static double HyperbolicEjectionAngle (Vector3d vinf, double eccentricity, Vector3d normal, Vector3d prograde)
+	private static Vector3d HyperbolicEjectionAngle (Vector3d vinf, double eccentricity, Vector3d normal)
 	{
 		vinf = vinf.normalized;
-		prograde = prograde.normalized;
 
 		// We have three equations of three unknowns (v.x, v.y, v.z):
 		//   dot(v, vinf) = cos(eta) = -1 / e  [Eq. 4.81]
@@ -664,11 +654,18 @@ public static class LambertSolver
 			v.z = -(v.x * normal.x + v.y * normal.y) / normal.z;
 		}
 
-		if (Vector3d.Dot (Vector3d.Cross (v, prograde), normal) < 0) {
-			return 360 - Vector3d.Angle (v, prograde);
-		} else {
-			return Vector3d.Angle (v, prograde);
+		return v;
+	}
+	
+	private static double TrueAnomaly (Orbit orbit, Vector3d direction)
+	{
+		Vector3d periapsis = orbit.GetEccVector ();
+		double trueAnomaly = Vector3d.Angle (periapsis, direction) * Math.PI / 180.0d;
+		if (Vector3d.Dot (Vector3d.Cross (periapsis, direction), orbit.GetOrbitNormal()) < 0) {
+			trueAnomaly = TwoPi - trueAnomaly;
 		}
+
+		return trueAnomaly;
 	}
 
 	private static bool CoplanarOrbits (Orbit o1, Orbit o2)
