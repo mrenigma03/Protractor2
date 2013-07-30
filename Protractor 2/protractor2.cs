@@ -9,9 +9,8 @@ using System.Reflection;
 public class Protractor2Module : PartModule
 {
     Rect mainwindow;
-    string 
-        target = "",
-        version = Assembly.GetExecutingAssembly().GetName().Version.ToString();
+    string version = Assembly.GetExecutingAssembly().GetName().Version.ToString();
+    double UT = 0;
 
     #region GUI functions
 
@@ -20,48 +19,73 @@ public class Protractor2Module : PartModule
         GUI.skin = HighLogic.Skin;
         if (HighLogic.LoadedSceneIsFlight && !FlightDriver.Pause)
         {
-            mainwindow = GUILayout.Window(897, mainwindow, mainGUI, "Protractor 2 v" + version, GUILayout.Width(40), GUILayout.Height(20));
+            mainwindow = GUILayout.Window(897, mainwindow, mainGUI, "Protractor 2 v" + version, GUILayout.Width(150), GUILayout.Height(200));
         }
 
     }
 
     void mainGUI(int windowID)
     {
+        CelestialBody target;
+        ITargetable t;
+        
+
         try
         {
-            GUI.skin = HighLogic.Skin;
-            
-            CelestialBody planet;
-
-            target = GUILayout.TextField(target, 20);
-
-            try
+            t = FlightGlobals.fetch.VesselTarget;
+            if (t != null && t is CelestialBody)
             {
-                foreach (CelestialBody body in FlightGlobals.Bodies)
+                target = (CelestialBody) FlightGlobals.fetch.VesselTarget;
+
+                GUILayout.Label("You have selected " + target.name + " as your target.");
+                if (UT == 0 || UT < Planetarium.GetUniversalTime())
                 {
-                    if (body.name == "target") planet = body;
+                    UT = LambertSolver.NextLaunchWindowUT(vessel.mainBody, target);
                 }
+                GUILayout.Label((UT - Planetarium.GetUniversalTime()).ToString() + " s to window");
+                double UT2 = UT;
+                Vector3d dv = LambertSolver.EjectionBurn(ref UT2, vessel, target);
+                GUILayout.Label((UT2 - Planetarium.GetUniversalTime()).ToString() + " s to window (adj)");
+
+                if (vessel.situation == Vessel.Situations.ORBITING)
+                {
+                    bool plot = GUILayout.Button("Plot");
+                    if (plot)
+                    {
+                        
+                        ManeuverNode mn = vessel.patchedConicSolver.AddManeuverNode(UT);
+                        mn.DeltaV = dv;
+                        mn.solver.UpdateFlightPlan();
+                        plot = false;
+
+                    }
+                }
+                else
+                {
+                    GUILayout.Label("Now get into orbit!");
+                }
+
             }
-            catch
+            else
             {
+                GUILayout.Label("No valid target selected");
             }
-
-            GUILayout.BeginHorizontal();
-            GUILayout.Label(target + "Data:");
-            GUILayout.EndHorizontal();
-
-            GUI.DragWindow();
         }
         catch
         {
-            Debug.Log("Error in mainGUI");
+            GUILayout.Label("Error selecting target");
+
         }
+
+        
+
+        GUI.DragWindow();
     }
 
     public override void OnStart(PartModule.StartState state)
     {
  	    base.OnStart(state);
-        mainwindow = new Rect(Screen.width / 2, Screen.height / 2, 40, 20);
+        mainwindow = new Rect(Screen.width / 2, Screen.height / 2, 150, 200);
         if (state != StartState.Editor)
         {
             RenderingManager.AddToPostDrawQueue(3, new Callback(drawGUI));
