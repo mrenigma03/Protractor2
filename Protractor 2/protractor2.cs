@@ -11,6 +11,7 @@ public class Protractor2Module : PartModule
     Rect mainwindow;
     string version = Assembly.GetExecutingAssembly().GetName().Version.ToString();
     double UT = 0;
+    string targetBody = "";
 
     #region GUI functions
 
@@ -38,22 +39,21 @@ public class Protractor2Module : PartModule
                 target = (CelestialBody) FlightGlobals.fetch.VesselTarget;
 
                 GUILayout.Label("You have selected " + target.name + " as your target.");
-                if (UT == 0 || UT < Planetarium.GetUniversalTime())
+                if (UT == 0 || UT < Planetarium.GetUniversalTime() || targetBody != target.name)
                 {
+                    targetBody = target.name;
                     UT = LambertSolver.NextLaunchWindowUT(vessel.mainBody, target);
                 }
                 GUILayout.Label((UT - Planetarium.GetUniversalTime()).ToString() + " s to window");
-                double UT2 = UT;
-                Vector3d dv = LambertSolver.EjectionBurn(ref UT2, vessel, target);
-                GUILayout.Label((UT2 - Planetarium.GetUniversalTime()).ToString() + " s to window (adj)");
 
                 if (vessel.situation == Vessel.Situations.ORBITING)
                 {
                     bool plot = GUILayout.Button("Plot");
                     if (plot)
                     {
-                        
-                        ManeuverNode mn = vessel.patchedConicSolver.AddManeuverNode(UT);
+                        double UT2;
+                        Vector3d dv = LambertSolver.EjectionBurn(vessel, target, out UT2);
+                        ManeuverNode mn = vessel.patchedConicSolver.AddManeuverNode(UT2);
                         mn.DeltaV = dv;
                         mn.solver.UpdateFlightPlan();
                         plot = false;

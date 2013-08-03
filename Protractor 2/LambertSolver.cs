@@ -129,10 +129,10 @@ public static class LambertSolver
 	/// Limitations: Does not take into account inclination change or radial delta-v when determining the time of the optimal transfer.
 	/// </summary>
 	/// <returns>A maneuver-node-compatible vector of radial, normal, and prograde delta-Vs.</returns>
-	/// <param name="ejectionUT">The universal time of the ejection burn. This value is updated with the actual time to perform the ejection.</param>
 	/// <param name="vessel">The vessel's orbit is assumed to be (approximately) circular and equatorial.</param>
 	/// <param name="destination">The destination body.</param>
-	public static Vector3d EjectionBurn(ref double ejectionUT, Vessel vessel, CelestialBody destination)
+    /// <param name="ejectionUT">The universal time of the ejection burn maneuver.</param>
+    public static Vector3d EjectionBurn(Vessel vessel, CelestialBody destination, out double ejectionUT)
 	{
 		CelestialBody origin = vessel.mainBody;
 		if (origin.referenceBody != destination.referenceBody) {
@@ -140,6 +140,7 @@ public static class LambertSolver
 		}
 
 		double gravParameter = origin.referenceBody.gravParameter;
+        ejectionUT = Planetarium.GetUniversalTime();
 		Vector3d pos1 = origin.orbit.getRelativePositionAtUT (ejectionUT);
 		Vector3d originVelocity = origin.orbit.getOrbitalVelocityAtUT (ejectionUT);
 		double hohmannTimeOfFlight = HohmannTimeOfFlight (origin.orbit, destination.orbit);
@@ -196,7 +197,7 @@ public static class LambertSolver
         Vector3d ejectionVector = v1 * Vector3d.Cross(ejectionNormal, ejectionDirection); // Velocity vector of our hyperbolic ejection orbit at ejection (aka hyperbolic periapsis)
 
 		// Modify the ejectionUT for when the vessel will reach the correct trueAnomaly
-		ejectionUT = Planetarium.GetUniversalTime() + vesselOrbit.GetDTforTrueAnomaly(trueAnomaly, 0);
+		ejectionUT += vesselOrbit.GetDTforTrueAnomaly(trueAnomaly, 0);
 
 		Vector3d orbitalVelocity = vesselOrbit.getOrbitalVelocityAtUT(ejectionUT);
 		Vector3d ejectionBurn = ejectionVector - orbitalVelocity;
