@@ -191,7 +191,9 @@ public static class LambertSolver
 		Vector3d orbitNormal = vesselOrbit.GetOrbitNormal().normalized;
 		Vector3d ejectionDirection = HyperbolicEjectionAngle(deltaV, e, orbitNormal);
 		double trueAnomaly = TrueAnomaly(vesselOrbit, ejectionDirection);
-		Vector3d ejectionVector = v1 * Vector3d.Cross(orbitNormal, ejectionDirection); // Velocity vector of our hyperbolic ejection orbit at ejection (aka hyperbolic periapsis)
+        double ejectionInclination = Math.Asin(Vector3d.Dot(deltaV, orbitNormal) / vinf) * 180.0 / Math.PI;
+        Vector3d ejectionNormal = QuaternionD.AngleAxis(ejectionInclination, ejectionDirection) * orbitNormal;
+        Vector3d ejectionVector = v1 * Vector3d.Cross(ejectionNormal, ejectionDirection); // Velocity vector of our hyperbolic ejection orbit at ejection (aka hyperbolic periapsis)
 
 		// Modify the ejectionUT for when the vessel will reach the correct trueAnomaly
 		ejectionUT = Planetarium.GetUniversalTime() + vesselOrbit.GetDTforTrueAnomaly(trueAnomaly, 0);
@@ -283,8 +285,7 @@ public static class LambertSolver
 		// AAS/AIAA Astrodynamics Conference, Provincetown, Massachusetts, AAS 79-164, June 25-27, 1979
 		double r1 = pos1.magnitude;
 		double r2 = pos2.magnitude;
-		double cosAngleOfFlight = Vector3d.Dot (pos1, pos2) / (r1 * r2);
-		double angleOfFlight = Math.Acos (cosAngleOfFlight);
+        double angleOfFlight = Math.Acos(Vector3d.Dot (pos1, pos2) / (r1 * r2));
 		if (longWay) {
 			angleOfFlight = TwoPi - angleOfFlight;
 		}
@@ -302,7 +303,7 @@ public static class LambertSolver
 		}
 
 		double normalizedTime = 4.0 * timeOfFlight * Math.Sqrt (gravParameter / (m * m * m));
-		double parabolicNormalizedTime = 2.0 / 3.0 * (1 - angleParameter * angleParameter * angleParameter);
+		double parabolicNormalizedTime = 2.0 / 3.0 * (1.0 - angleParameter * angleParameter * angleParameter);
 		double minimumEnergyNormalizedTime = Math.Acos (angleParameter) + angleParameter * Math.Sqrt (1 - angleParameter * angleParameter);
 
 		double x, y; // Path parameters
@@ -532,12 +533,6 @@ public static class LambertSolver
 		double fc = fa;
 		double d = b - a;
 		double e = d;
-
-		if (fa >= 0) {
-			return a;
-		} else if (fb <= 0) {
-			return b;
-		}
 
 		for (int i = 0;; i++) {
 			if (Math.Abs (fc) < Math.Abs (fb)) { // If c is closer to the root than b, swap b and c
